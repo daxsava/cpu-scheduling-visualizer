@@ -66,6 +66,97 @@ class FCFS extends SchedulingAlgorithm {
   }
 }
 
+// ─── SJF (Non-Preemptive) ────────────────────────────────────────────────── //
+class SJF extends SchedulingAlgorithm {
+  constructor() {
+    super();
+    this.name = 'SJF - Shortest Job First';
+    this.implemented = true;
+    this.description = {
+      title: 'SJF — Shortest Job First',
+      type: 'Non-Preemptive',
+      complexity: 'O(n²)',
+      body: 'At each scheduling point, the process with the <b>smallest burst time</b> in the ready queue is selected. Once started, the process runs to completion.',
+      pros: ['Minimises average waiting time', 'Optimal for minimising average TAT'],
+      cons: ['Starvation of long processes', 'Requires advance knowledge of burst times'],
+    };
+  }
+
+  schedule(processes) {
+    const result = new ScheduleResult();
+    if (!processes.length) return result;
+
+    const remaining = this._cloneProcesses(processes);
+    // Sort by arrival time initially so idle-gap detection is simple
+    remaining.sort((a, b) => a.arrivalTime - b.arrivalTime || a.pid.localeCompare(b.pid));
+
+    let t = 0, sn = 1;
+    const completed = [];
+
+    // Announce all processes
+    remaining.forEach(p => {
+      result.steps.push({ n: sn++, type: 'arrive',
+        html: `<em>${p.pid}</em> arrives at time <b>${p.arrivalTime}</b> with burst time <b>${p.burstTime}</b>.` });
+    });
+
+    while (remaining.length > 0) {
+      // Find all processes that have arrived by time t
+      const ready = remaining.filter(p => p.arrivalTime <= t);
+
+      if (ready.length === 0) {
+        // CPU idle — jump to the next process arrival
+        const nextArrival = Math.min(...remaining.map(p => p.arrivalTime));
+        result.ganttBlocks.push(new GanttBlock('IDLE', t, nextArrival, true));
+        result.steps.push({ n: sn++, type: 'idle',
+          html: `CPU <span class="idle-chip">IDLE</span> from <b>${t}</b> → <b>${nextArrival}</b>. No process in ready queue.` });
+        t = nextArrival;
+        continue;
+      }
+
+      // Pick process with shortest burst time; break ties by arrival time, then PID
+      ready.sort((a, b) => a.burstTime - b.burstTime || a.arrivalTime - b.arrivalTime || a.pid.localeCompare(b.pid));
+      const proc = ready[0];
+
+      // Show what's in the ready queue at this decision point
+      if (ready.length > 1) {
+        const queue = ready.map(p => `<em>${p.pid}</em>(BT=${p.burstTime})`).join(', ');
+        result.steps.push({ n: sn++, type: 'info',
+          html: `Ready queue at t=<b>${t}</b>: [${queue}] → <em>${proc.pid}</em> selected (shortest BT).` });
+      }
+
+      // Remove from remaining
+      const idx = remaining.indexOf(proc);
+      remaining.splice(idx, 1);
+
+      proc.startTime      = t;
+      proc.completionTime = t + proc.burstTime;
+      proc.computeMetrics();
+
+      result.ganttBlocks.push(new GanttBlock(proc.pid, proc.startTime, proc.completionTime, false, proc.pid));
+      result.steps.push({ n: sn++, type: 'execute',
+        html: `<em>${proc.pid}</em> runs <b>${proc.startTime}→${proc.completionTime}</b>
+               &nbsp;|&nbsp; TAT <span class="chip blue">${proc.turnaroundTime}</span>
+               WT <span class="chip green">${proc.waitingTime}</span>
+               RT <span class="chip purple">${proc.responseTime}</span>` });
+
+      t = proc.completionTime;
+      completed.push(proc);
+
+      // Announce any new arrivals during this burst
+      const newArrivals = remaining.filter(p => p.arrivalTime > proc.startTime && p.arrivalTime <= t);
+      newArrivals.forEach(p => {
+        result.steps.push({ n: sn++, type: 'info',
+          html: `<em>${p.pid}</em> joined the ready queue at t=<b>${p.arrivalTime}</b> while <em>${proc.pid}</em> was running.` });
+      });
+    }
+
+    result.steps.push({ n: sn, type: 'done', html: `✓ All processes completed at time <b>${t}</b>.` });
+    result.processes = completed;
+    result.stats = this._computeStatistics(completed, result.ganttBlocks);
+    return result;
+  }
+}
+
 // ─── Coming-soon stubs ───────────────────────────────────────────────────── //
 function _stub(name, title, typeStr, complexity, body, pros, cons) {
   return class extends SchedulingAlgorithm {
@@ -81,14 +172,6 @@ function _stub(name, title, typeStr, complexity, body, pros, cons) {
     }
   };
 }
-
-const SJF = _stub(
-  'SJF - Shortest Job First', 'SJF — Shortest Job First',
-  'Non-Preemptive', 'O(n²)',
-  'Picks the ready process with the <b>smallest burst time</b>.',
-  ['Minimises average waiting time'],
-  ['Starvation of long processes', 'Needs advance knowledge of burst times']
-);
 
 const SRTF = _stub(
   'SRTF - Shortest Remaining Time First', 'SRTF — Shortest Remaining Time First',
