@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CPU Scheduling Algorithm Visualizer</title>
+  <meta name="description" content="An interactive educational tool for visualizing CPU scheduling algorithms including FCFS, SJF, SRTF, Priority, and Round Robin with Gantt charts and step-by-step execution." />
+
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- Scripts (order matters: models → base → algorithms → gantt → app) -->
+  <script src="js/models/process.js" defer></script>
+  <script src="js/algorithms/base.js" defer></script>
+  <script src="js/algorithms/algorithms.js" defer></script>
+  <script src="js/visualization/gantt.js" defer></script>
+  <script src="js/app.js" defer></script>
+</head>
+<body>
+
+<!-- ═══════════════ HEADER ═══════════════════════════════════════════════ -->
+<header>
+  <div class="header-left">
+    <h1>⚙ CPU Scheduling Algorithm Visualizer</h1>
+    <p>An educational tool for understanding OS process scheduling</p>
+  </div>
+  <div class="header-right">
+    <span class="version-badge">v1.0 · FCFS Ready</span>
+  </div>
+</header>
+
+<!-- ═══════════════ MAIN LAYOUT ═══════════════════════════════════════════ -->
+<div class="layout">
+
+  <!-- ─── LEFT SIDEBAR ──────────────────────────────────────────────────── -->
+  <aside class="sidebar">
+
+    <!-- Algorithm selector -->
+    <div class="card">
+      <div class="section-title">🔧 Algorithm</div>
+
+      <select id="algo-select" onchange="selectAlgorithm()">
+        <!-- populated by JS -->
+      </select>
+
+      <div id="status-badge" class="badge badge-green">● ACTIVE</div>
+
+      <!-- Info panel -->
+      <div class="info-panel">
+        <div id="info-title"></div>
+        <p id="info-body"></p>
+        <div class="info-meta">
+          <span class="meta-chip" id="info-type">—</span>
+          <span class="meta-chip" id="info-complexity">—</span>
+        </div>
+        <div class="info-pros-cons">
+          <div class="info-pros">
+            <h4>✔ Pros</h4>
+            <ul id="info-pros"></ul>
+          </div>
+          <div class="info-cons">
+            <h4>✘ Cons</h4>
+            <ul id="info-cons"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ─── RIGHT CONTENT ─────────────────────────────────────────────────── -->
+  <main>
+
+    <!-- ── Process Input ──────────────────────────────────────────────── -->
+    <div class="card">
+      <div class="section-title">📋 Process Input</div>
+
+      <!-- Inline entry row -->
+      <div class="input-row">
+        <div class="input-group">
+          <label>Arrival Time</label>
+          <input id="at-input" type="number" min="0" value="" placeholder="0" />
+        </div>
+        <div class="input-group">
+          <label>Burst Time</label>
+          <input id="bt-input" type="number" min="1" value="" placeholder="4" />
+        </div>
+        <div class="input-group">
+          <label>Priority</label>
+          <input id="pr-input" type="number" value="0" placeholder="0" />
+        </div>
+        <button class="btn btn-success" onclick="addProcess()">＋ Add Process</button>
+      </div>
+
+      <!-- Table -->
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Process ID</th>
+              <th>Arrival Time</th>
+              <th>Burst Time</th>
+              <th>Priority</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="proc-tbody">
+            <!-- rows injected by JS -->
+          </tbody>
+        </table>
+      </div>
+      <div id="proc-count">0 processes</div>
+      <div id="error-msg" class="hidden"></div>
+
+      <!-- Control buttons -->
+      <div class="btn-row" style="margin-top:14px;">
+        <button class="btn btn-danger"  onclick="removeSelected()">✕ Remove Selected</button>
+        <button class="btn btn-muted"   onclick="clearAll()">⟳ Clear All</button>
+        <button class="btn btn-outline" onclick="loadExample()">📂 Load Example</button>
+        <div class="btn-divider"></div>
+        <button class="btn btn-calculate" onclick="calculate()">▶ Calculate</button>
+        <button class="btn btn-muted"   onclick="reset()">↺ Reset</button>
+      </div>
+    </div>
+
+    <!-- ── Results Table ───────────────────────────────────────────────── -->
+    <div class="card hidden" id="results-section">
+      <div class="section-title">📊 Results Table</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Process</th>
+              <th title="Arrival Time">AT</th>
+              <th title="Burst Time">BT</th>
+              <th title="Start Time">ST</th>
+              <th title="Completion Time">CT</th>
+              <th title="Turnaround Time">TAT</th>
+              <th title="Waiting Time">WT</th>
+              <th title="Response Time">RT</th>
+            </tr>
+          </thead>
+          <tbody id="results-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- Statistics -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="label">Avg Waiting Time</div>
+          <div class="value" id="stat-awt">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Avg Turnaround Time</div>
+          <div class="value" id="stat-atat">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Avg Response Time</div>
+          <div class="value" id="stat-art">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">CPU Utilization</div>
+          <div class="value" id="stat-cpu">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Throughput</div>
+          <div class="value" id="stat-tp">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Gantt Chart ─────────────────────────────────────────────────── -->
+    <div class="card hidden" id="gantt-section">
+      <div class="section-title">📈 Gantt Chart</div>
+      <div class="gantt-wrap">
+        <canvas id="gantt-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- ── Execution Steps ─────────────────────────────────────────────── -->
+    <div class="card hidden" id="steps-section">
+      <div class="section-title">🔍 Execution Steps</div>
+      <div class="steps-scroll" id="steps-list">
+        <!-- steps injected by JS -->
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<footer>
+  CPU Scheduling Algorithm Visualizer &nbsp;·&nbsp; Built for OS Education &nbsp;·&nbsp;
+  FCFS fully implemented · SJF · SRTF · Priority · Round Robin coming soon
+</footer>
+
+</body>
+</html>
