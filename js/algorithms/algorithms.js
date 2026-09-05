@@ -157,53 +157,363 @@ class SJF extends SchedulingAlgorithm {
   }
 }
 
-// ─── Coming-soon stubs ───────────────────────────────────────────────────── //
-function _stub(name, title, typeStr, complexity, body, pros, cons) {
-  return class extends SchedulingAlgorithm {
-    constructor() {
-      super();
-      this.name = name; this.implemented = false;
-      this.description = { title, type: typeStr, complexity, body, pros, cons };
+// ─── SRTF (Preemptive SJF) ──────────────────────────────────────────────── //
+class SRTF extends SchedulingAlgorithm {
+  constructor() {
+    super();
+    this.name = 'SRTF - Shortest Remaining Time First';
+    this.implemented = true;
+    this.description = {
+      title: 'SRTF — Shortest Remaining Time First',
+      type: 'Preemptive',
+      complexity: 'O(n²)',
+      body: 'Preemptive version of SJF. At every unit of time, the process with the <b>shortest remaining burst time</b> is executed. A new arrival can preempt the running process.',
+      pros: ['Optimal average waiting time', 'Responsive to short jobs'],
+      cons: ['High context-switch overhead', 'Starvation of long processes', 'Needs burst time knowledge'],
+    };
+  }
+
+  schedule(processes) {
+    const result = new ScheduleResult();
+    if (!processes.length) return result;
+
+    const procs = this._cloneProcesses(processes);
+    procs.forEach(p => { p.remainingTime = p.burstTime; p.startTime = null; });
+    procs.sort((a, b) => a.arrivalTime - b.arrivalTime);
+
+    let t = 0, sn = 1, completed = 0, n = procs.length;
+    let lastPid = null;
+    let ganttStart = 0;
+
+    // Announce arrivals
+    procs.forEach(p => result.steps.push({ n: sn++, type: 'arrive',
+      html: `<em>${p.pid}</em> arrives at t=<b>${p.arrivalTime}</b>, BT=<b>${p.burstTime}</b>.` }));
+
+    const maxTime = procs.reduce((s, p) => s + p.burstTime, 0) + procs[procs.length - 1].arrivalTime + 1;
+
+    while (completed < n && t < maxTime) {
+      const ready = procs.filter(p => p.arrivalTime <= t && p.remainingTime > 0);
+
+      if (!ready.length) {
+        // Idle gap
+        const nextArr = Math.min(...procs.filter(p => p.remainingTime > 0).map(p => p.arrivalTime));
+        if (lastPid !== 'IDLE') {
+          if (lastPid !== null) result.ganttBlocks.push(new GanttBlock(lastPid, ganttStart, t, false, lastPid));
+          result.ganttBlocks.push(new GanttBlock('IDLE', t, nextArr, true));
+          result.steps.push({ n: sn++, type: 'idle',
+            html: `CPU <span class="idle-chip">IDLE</span> from <b>${t}</b> → <b>${nextArr}</b>.` });
+          ganttStart = nextArr; lastPid = null;
+        }
+        t = nextArr; continue;
+      }
+
+      ready.sort((a, b) => a.remainingTime - b.remainingTime || a.arrivalTime - b.arrivalTime || a.pid.localeCompare(b.pid));
+      const proc = ready[0];
+
+      if (proc.startTime === null) proc.startTime = t;
+
+      // Preemption — new process took over
+      if (proc.pid !== lastPid) {
+        if (lastPid !== null && lastPid !== 'IDLE') {
+          result.ganttBlocks.push(new GanttBlock(lastPid, ganttStart, t, false, lastPid));
+          const prev = procs.find(p => p.pid === lastPid);
+          if (prev && prev.remainingTime > 0) {
+            result.steps.push({ n: sn++, type: 'info',
+              html: `<em>${proc.pid}</em> preempts <em>${lastPid}</em> at t=<b>${t}</b> (remaining: ${prev.remainingTime}).` });
+          }
+        }
+        ganttStart = t;
+        lastPid = proc.pid;
+      }
+
+      proc.remainingTime--;
+      t++;
+
+      if (proc.remainingTime === 0) {
+        proc.completionTime = t;
+        proc.computeMetrics();
+        result.ganttBlocks.push(new GanttBlock(proc.pid, ganttStart, t, false, proc.pid));
+        result.steps.push({ n: sn++, type: 'execute',
+          html: `<em>${proc.pid}</em> completes at t=<b>${t}</b>
+                 &nbsp;|&nbsp; TAT <span class="chip blue">${proc.turnaroundTime}</span>
+                 WT <span class="chip green">${proc.waitingTime}</span>
+                 RT <span class="chip purple">${proc.responseTime}</span>` });
+        ganttStart = t; lastPid = null;
+        completed++;
+      }
     }
-    schedule() {
-      const r = new ScheduleResult();
-      r.steps = [{ n: 1, type: 'coming-soon', html: `<b>${this.name}</b> — Coming Soon! 🚧` }];
-      return r;
-    }
-  };
+
+    // Merge consecutive same-pid Gantt blocks for cleaner display
+    const merged = [];
+    result.ganttBlocks.forEach(b => {
+      const last = merged[merged.length - 1];
+      if (last && last.pid === b.pid && last.end === b.start && !b.isIdle) {
+        last.end = b.end;
+      } else { merged.push({ ...b }); }
+    });
+    result.ganttBlocks = merged;
+
+    result.steps.push({ n: sn, type: 'done', html: `✓ All processes completed at time <b>${t}</b>.` });
+    result.processes = procs.filter(p => p.completionTime !== null);
+    result.stats = this._computeStatistics(result.processes, result.ganttBlocks);
+    return result;
+  }
 }
 
-const SRTF = _stub(
-  'SRTF - Shortest Remaining Time First', 'SRTF — Shortest Remaining Time First',
-  'Preemptive', 'O(n log n)',
-  'Preemptive SJF — a new arrival preempts if its burst is shorter than remaining time.',
-  ['Optimal average waiting time'],
-  ['High context-switch overhead', 'Starvation possible']
-);
+// ─── Priority Non-Preemptive ─────────────────────────────────────────────── //
+class PriorityNP extends SchedulingAlgorithm {
+  constructor() {
+    super();
+    this.name = 'Priority - Non Preemptive';
+    this.implemented = true;
+    this.description = {
+      title: 'Priority Scheduling (Non-Preemptive)',
+      type: 'Non-Preemptive',
+      complexity: 'O(n²)',
+      body: 'Each process has a <b>priority number</b> (lower = higher priority). The CPU is given to the highest-priority ready process. Once started, it runs to completion.',
+      pros: ['Important tasks served first', 'Simple to implement'],
+      cons: ['Starvation of low-priority processes', 'Priority inversion possible'],
+    };
+  }
 
-const PriorityNP = _stub(
-  'Priority - Non Preemptive', 'Priority Scheduling (Non-Preemptive)',
-  'Non-Preemptive', 'O(n²)',
-  'Highest priority (lowest number) process runs to completion.',
-  ['Important tasks served first'],
-  ['Starvation of low-priority processes']
-);
+  schedule(processes) {
+    const result = new ScheduleResult();
+    if (!processes.length) return result;
 
-const PriorityP = _stub(
-  'Priority - Preemptive', 'Priority Scheduling (Preemptive)',
-  'Preemptive', 'O(n log n)',
-  'A higher-priority arrival preempts the current process.',
-  ['Dynamic prioritisation'],
-  ['High overhead', 'Starvation possible']
-);
+    const remaining = this._cloneProcesses(processes);
+    remaining.sort((a, b) => a.arrivalTime - b.arrivalTime || a.pid.localeCompare(b.pid));
 
-const RoundRobin = _stub(
-  'Round Robin', 'Round Robin',
-  'Preemptive', 'O(n)',
-  'Each process gets a fixed <b>time quantum</b>; rotated fairly.',
-  ['Fair CPU sharing', 'Good for time-sharing systems'],
-  ['Performance depends on quantum size', 'Higher average TAT than SJF']
-);
+    let t = 0, sn = 1;
+    const completed = [];
+
+    remaining.forEach(p => result.steps.push({ n: sn++, type: 'arrive',
+      html: `<em>${p.pid}</em> arrives at t=<b>${p.arrivalTime}</b>, BT=<b>${p.burstTime}</b>, Priority=<b>${p.priority}</b>.` }));
+
+    while (remaining.length > 0) {
+      const ready = remaining.filter(p => p.arrivalTime <= t);
+
+      if (!ready.length) {
+        const nextArr = Math.min(...remaining.map(p => p.arrivalTime));
+        result.ganttBlocks.push(new GanttBlock('IDLE', t, nextArr, true));
+        result.steps.push({ n: sn++, type: 'idle',
+          html: `CPU <span class="idle-chip">IDLE</span> from <b>${t}</b> → <b>${nextArr}</b>.` });
+        t = nextArr; continue;
+      }
+
+      // Lower priority number = higher priority; tie-break: arrival time then PID
+      ready.sort((a, b) => a.priority - b.priority || a.arrivalTime - b.arrivalTime || a.pid.localeCompare(b.pid));
+      const proc = ready[0];
+
+      if (ready.length > 1) {
+        const q = ready.map(p => `<em>${p.pid}</em>(P=${p.priority})`).join(', ');
+        result.steps.push({ n: sn++, type: 'info',
+          html: `Ready queue at t=<b>${t}</b>: [${q}] → <em>${proc.pid}</em> selected (highest priority).` });
+      }
+
+      remaining.splice(remaining.indexOf(proc), 1);
+      proc.startTime = t;
+      proc.completionTime = t + proc.burstTime;
+      proc.computeMetrics();
+      result.ganttBlocks.push(new GanttBlock(proc.pid, proc.startTime, proc.completionTime, false, proc.pid));
+      result.steps.push({ n: sn++, type: 'execute',
+        html: `<em>${proc.pid}</em> runs <b>${proc.startTime}→${proc.completionTime}</b>
+               &nbsp;|&nbsp; TAT <span class="chip blue">${proc.turnaroundTime}</span>
+               WT <span class="chip green">${proc.waitingTime}</span>
+               RT <span class="chip purple">${proc.responseTime}</span>` });
+      t = proc.completionTime;
+      completed.push(proc);
+    }
+
+    result.steps.push({ n: sn, type: 'done', html: `✓ All processes completed at time <b>${t}</b>.` });
+    result.processes = completed;
+    result.stats = this._computeStatistics(completed, result.ganttBlocks);
+    return result;
+  }
+}
+
+// ─── Priority Preemptive ─────────────────────────────────────────────────── //
+class PriorityP extends SchedulingAlgorithm {
+  constructor() {
+    super();
+    this.name = 'Priority - Preemptive';
+    this.implemented = true;
+    this.description = {
+      title: 'Priority Scheduling (Preemptive)',
+      type: 'Preemptive',
+      complexity: 'O(n²)',
+      body: 'Like non-preemptive priority, but if a <b>higher-priority process arrives</b>, it immediately preempts the running process.',
+      pros: ['Highly responsive to critical tasks', 'Real-time system support'],
+      cons: ['High context-switch overhead', 'Starvation of low-priority processes'],
+    };
+  }
+
+  schedule(processes) {
+    const result = new ScheduleResult();
+    if (!processes.length) return result;
+
+    const procs = this._cloneProcesses(processes);
+    procs.forEach(p => { p.remainingTime = p.burstTime; p.startTime = null; });
+    procs.sort((a, b) => a.arrivalTime - b.arrivalTime);
+
+    let t = 0, sn = 1, completed = 0, n = procs.length;
+    let lastPid = null, ganttStart = 0;
+
+    procs.forEach(p => result.steps.push({ n: sn++, type: 'arrive',
+      html: `<em>${p.pid}</em> arrives at t=<b>${p.arrivalTime}</b>, BT=<b>${p.burstTime}</b>, Priority=<b>${p.priority}</b>.` }));
+
+    const maxTime = procs.reduce((s, p) => s + p.burstTime, 0) + procs[procs.length - 1].arrivalTime + 1;
+
+    while (completed < n && t < maxTime) {
+      const ready = procs.filter(p => p.arrivalTime <= t && p.remainingTime > 0);
+
+      if (!ready.length) {
+        const nextArr = Math.min(...procs.filter(p => p.remainingTime > 0).map(p => p.arrivalTime));
+        if (lastPid !== null) { result.ganttBlocks.push(new GanttBlock(lastPid, ganttStart, t, false, lastPid)); }
+        result.ganttBlocks.push(new GanttBlock('IDLE', t, nextArr, true));
+        result.steps.push({ n: sn++, type: 'idle',
+          html: `CPU <span class="idle-chip">IDLE</span> from <b>${t}</b> → <b>${nextArr}</b>.` });
+        ganttStart = nextArr; lastPid = null; t = nextArr; continue;
+      }
+
+      ready.sort((a, b) => a.priority - b.priority || a.arrivalTime - b.arrivalTime || a.pid.localeCompare(b.pid));
+      const proc = ready[0];
+
+      if (proc.startTime === null) proc.startTime = t;
+
+      if (proc.pid !== lastPid) {
+        if (lastPid !== null) {
+          result.ganttBlocks.push(new GanttBlock(lastPid, ganttStart, t, false, lastPid));
+          const prev = procs.find(p => p.pid === lastPid);
+          if (prev && prev.remainingTime > 0)
+            result.steps.push({ n: sn++, type: 'info',
+              html: `<em>${proc.pid}</em> (priority <b>${proc.priority}</b>) preempts <em>${lastPid}</em> at t=<b>${t}</b>.` });
+        }
+        ganttStart = t; lastPid = proc.pid;
+      }
+
+      proc.remainingTime--; t++;
+
+      if (proc.remainingTime === 0) {
+        proc.completionTime = t;
+        proc.computeMetrics();
+        result.ganttBlocks.push(new GanttBlock(proc.pid, ganttStart, t, false, proc.pid));
+        result.steps.push({ n: sn++, type: 'execute',
+          html: `<em>${proc.pid}</em> completes at t=<b>${t}</b>
+                 &nbsp;|&nbsp; TAT <span class="chip blue">${proc.turnaroundTime}</span>
+                 WT <span class="chip green">${proc.waitingTime}</span>
+                 RT <span class="chip purple">${proc.responseTime}</span>` });
+        ganttStart = t; lastPid = null; completed++;
+      }
+    }
+
+    // Merge consecutive Gantt blocks
+    const merged = [];
+    result.ganttBlocks.forEach(b => {
+      const last = merged[merged.length - 1];
+      if (last && last.pid === b.pid && last.end === b.start && !b.isIdle) last.end = b.end;
+      else merged.push({ ...b });
+    });
+    result.ganttBlocks = merged;
+
+    result.steps.push({ n: sn, type: 'done', html: `✓ All processes completed at time <b>${t}</b>.` });
+    result.processes = procs.filter(p => p.completionTime !== null);
+    result.stats = this._computeStatistics(result.processes, result.ganttBlocks);
+    return result;
+  }
+}
+
+// ─── Round Robin ─────────────────────────────────────────────────────────── //
+class RoundRobin extends SchedulingAlgorithm {
+  constructor(quantum = 2) {
+    super();
+    this.quantum = quantum;
+    this.name = 'Round Robin';
+    this.implemented = true;
+    this.description = {
+      title: 'Round Robin',
+      type: 'Preemptive',
+      complexity: 'O(n)',
+      body: 'Each process is given a fixed <b>time quantum</b>. After the quantum expires, it goes to the back of the ready queue. Repeated until all processes finish.',
+      pros: ['Fair — every process gets equal CPU time', 'Good response time for interactive systems'],
+      cons: ['Performance heavily depends on quantum size', 'Higher average TAT than SJF'],
+    };
+  }
+
+  schedule(processes, quantum) {
+    const result = new ScheduleResult();
+    if (!processes.length) return result;
+
+    const q = quantum || this.quantum;
+    const procs = this._cloneProcesses(processes);
+    procs.forEach(p => { p.remainingTime = p.burstTime; p.startTime = null; });
+    procs.sort((a, b) => a.arrivalTime - b.arrivalTime || a.pid.localeCompare(b.pid));
+
+    let t = 0, sn = 1;
+    const queue = [];    // ready queue (ordered)
+    const done = [];
+    const inQueue = new Set();
+
+    result.steps.push({ n: sn++, type: 'info',
+      html: `Round Robin started with time quantum = <b>${q}</b>.` });
+
+    procs.forEach(p => result.steps.push({ n: sn++, type: 'arrive',
+      html: `<em>${p.pid}</em> arrives at t=<b>${p.arrivalTime}</b>, BT=<b>${p.burstTime}</b>.` }));
+
+    // Enqueue processes that arrive at time 0
+    procs.filter(p => p.arrivalTime <= t).forEach(p => { queue.push(p); inQueue.add(p.pid); });
+
+    const maxTime = procs.reduce((s, p) => s + p.burstTime, 0) + procs[procs.length - 1].arrivalTime + 1;
+
+    while ((queue.length > 0 || procs.some(p => p.remainingTime > 0)) && t < maxTime) {
+      if (!queue.length) {
+        // CPU idle
+        const nextArr = Math.min(...procs.filter(p => p.remainingTime > 0 && !inQueue.has(p.pid)).map(p => p.arrivalTime));
+        result.ganttBlocks.push(new GanttBlock('IDLE', t, nextArr, true));
+        result.steps.push({ n: sn++, type: 'idle',
+          html: `CPU <span class="idle-chip">IDLE</span> from <b>${t}</b> → <b>${nextArr}</b>.` });
+        t = nextArr;
+        procs.filter(p => p.arrivalTime <= t && p.remainingTime > 0 && !inQueue.has(p.pid))
+             .forEach(p => { queue.push(p); inQueue.add(p.pid); });
+        continue;
+      }
+
+      const proc = queue.shift();
+      if (proc.startTime === null) proc.startTime = t;
+
+      const execTime = Math.min(q, proc.remainingTime);
+      const execEnd  = t + execTime;
+
+      result.ganttBlocks.push(new GanttBlock(proc.pid, t, execEnd, false, proc.pid));
+
+      // Enqueue arrivals during this slice
+      procs.filter(p => p.arrivalTime > t && p.arrivalTime <= execEnd && p.remainingTime > 0 && !inQueue.has(p.pid))
+           .forEach(p => { queue.push(p); inQueue.add(p.pid); });
+
+      proc.remainingTime -= execTime;
+      t = execEnd;
+
+      if (proc.remainingTime === 0) {
+        proc.completionTime = t;
+        proc.computeMetrics();
+        result.steps.push({ n: sn++, type: 'execute',
+          html: `<em>${proc.pid}</em> runs slice <b>${t - execTime}→${t}</b> and <b>completes</b>.
+                 &nbsp;|&nbsp; TAT <span class="chip blue">${proc.turnaroundTime}</span>
+                 WT <span class="chip green">${proc.waitingTime}</span>
+                 RT <span class="chip purple">${proc.responseTime}</span>` });
+        done.push(proc);
+      } else {
+        result.steps.push({ n: sn++, type: 'execute',
+          html: `<em>${proc.pid}</em> runs slice <b>${t - execTime}→${t}</b>, remaining=<b>${proc.remainingTime}</b> → back to queue.` });
+        queue.push(proc);  // re-enqueue at back
+      }
+    }
+
+    result.steps.push({ n: sn, type: 'done', html: `✓ All processes completed at time <b>${t}</b>.` });
+    result.processes = done;
+    result.stats = this._computeStatistics(done, result.ganttBlocks);
+    return result;
+  }
+}
 
 // ─── Global registry ─────────────────────────────────────────────────────── //
 const ALGORITHMS = {
@@ -212,5 +522,5 @@ const ALGORITHMS = {
   'SRTF - Shortest Remaining Time First': new SRTF(),
   'Priority - Non Preemptive':            new PriorityNP(),
   'Priority - Preemptive':                new PriorityP(),
-  'Round Robin':                          new RoundRobin(),
+  'Round Robin':                          new RoundRobin(2),
 };

@@ -47,12 +47,19 @@ function selectAlgorithm() {
   if (!algo) return;
   updateInfoPanel(algo);
   const badge = document.getElementById('status-badge');
+  const qrow  = document.getElementById('quantum-row');
   if (algo.implemented) {
     badge.textContent = '● ACTIVE';
     badge.className = 'badge badge-green';
   } else {
     badge.textContent = '⏳ COMING SOON';
     badge.className = 'badge badge-orange';
+  }
+  // Show quantum input only for Round Robin
+  if (name === 'Round Robin') {
+    qrow.classList.remove('hidden');
+  } else {
+    qrow.classList.add('hidden');
   }
 }
 
@@ -167,8 +174,15 @@ function calculate() {
 
   const procs = processRows.map(r => new Process(r.pid, r.at, r.bt, r.pr));
   let result;
-  try { result = algo.schedule(procs); }
-  catch (e) { showError('Calculation error: ' + e.message); return; }
+  try {
+    const name = document.getElementById('algo-select').value;
+    if (name === 'Round Robin') {
+      const q = parseInt(document.getElementById('quantum-input').value) || 2;
+      result = algo.schedule(procs, q);
+    } else {
+      result = algo.schedule(procs);
+    }
+  } catch (e) { showError('Calculation error: ' + e.message); return; }
 
   displayResults(result);
 }
