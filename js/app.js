@@ -218,10 +218,6 @@ function displayResults(result) {
   document.getElementById('stat-cpu').textContent   = s.cpuUtilization.toFixed(2) + '%';
   document.getElementById('stat-tp').textContent    = s.throughput.toFixed(4) + ' proc/unit';
 
-  // Gantt
-  resizeCanvas();
-  ganttRenderer.draw(result.ganttBlocks);
-
   // Steps
   const stepsDiv = document.getElementById('steps-list');
   stepsDiv.innerHTML = '';
@@ -232,10 +228,15 @@ function displayResults(result) {
     stepsDiv.appendChild(div);
   });
 
-  // Show results sections
+  // IMPORTANT: unhide sections BEFORE resizing the canvas so clientWidth is correct
   document.getElementById('results-section').classList.remove('hidden');
   document.getElementById('gantt-section').classList.remove('hidden');
   document.getElementById('steps-section').classList.remove('hidden');
+
+  // Now that gantt-section is visible, canvas has the correct width
+  resizeCanvas();
+  ganttRenderer.draw(result.ganttBlocks);
+
   document.getElementById('results-section').scrollIntoView({ behavior: 'smooth' });
 }
 
