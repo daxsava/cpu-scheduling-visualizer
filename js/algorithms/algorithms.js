@@ -181,49 +181,55 @@ class SRTF extends SchedulingAlgorithm {
     procs.forEach(p => { p.remainingTime = p.burstTime; p.startTime = null; });
     procs.sort((a, b) => a.arrivalTime - b.arrivalTime);
 
-    let t = 0, sn = 1, completed = 0, n = procs.length;
-    let lastPid = null;
-    let ganttStart = 0;
-
-    // Announce arrivals
+    // Announce all arrivals upfront
+    let sn = 1;
     procs.forEach(p => result.steps.push({ n: sn++, type: 'arrive',
       html: `<em>${p.pid}</em> arrives at t=<b>${p.arrivalTime}</b>, BT=<b>${p.burstTime}</b>.` }));
 
-    const maxTime = procs.reduce((s, p) => s + p.burstTime, 0) + procs[procs.length - 1].arrivalTime + 1;
+    let t = 0, completed = 0, n = procs.length;
+    let lastPid = null; // tracks which PID owns the current open gantt block
 
-    while (completed < n && t < maxTime) {
+    while (completed < n) {
       const ready = procs.filter(p => p.arrivalTime <= t && p.remainingTime > 0);
 
       if (!ready.length) {
-        // Idle gap
+        // No process ready — CPU idle. Jump to next arrival.
         const nextArr = Math.min(...procs.filter(p => p.remainingTime > 0).map(p => p.arrivalTime));
         if (lastPid !== 'IDLE') {
-          if (lastPid !== null) result.ganttBlocks.push(new GanttBlock(lastPid, ganttStart, t, false, lastPid));
           result.ganttBlocks.push(new GanttBlock('IDLE', t, nextArr, true));
           result.steps.push({ n: sn++, type: 'idle',
             html: `CPU <span class="idle-chip">IDLE</span> from <b>${t}</b> → <b>${nextArr}</b>.` });
-          ganttStart = nextArr; lastPid = null;
+          lastPid = 'IDLE';
+        } else {
+          // extend the existing IDLE block
+          result.ganttBlocks[result.ganttBlocks.length - 1].end = nextArr;
         }
-        t = nextArr; continue;
+        t = nextArr;
+        continue;
       }
 
+      // Pick process with shortest remaining time; ties by arrival then PID
       ready.sort((a, b) => a.remainingTime - b.remainingTime || a.arrivalTime - b.arrivalTime || a.pid.localeCompare(b.pid));
       const proc = ready[0];
 
+      // Record first-time start
       if (proc.startTime === null) proc.startTime = t;
 
-      // Preemption — new process took over
       if (proc.pid !== lastPid) {
+        // Context switch — log preemption if something was running before
         if (lastPid !== null && lastPid !== 'IDLE') {
-          result.ganttBlocks.push(new GanttBlock(lastPid, ganttStart, t, false, lastPid));
           const prev = procs.find(p => p.pid === lastPid);
           if (prev && prev.remainingTime > 0) {
             result.steps.push({ n: sn++, type: 'info',
-              html: `<em>${proc.pid}</em> preempts <em>${lastPid}</em> at t=<b>${t}</b> (remaining: ${prev.remainingTime}).` });
+              html: `<em>${proc.pid}</em> preempts <em>${lastPid}</em> at t=<b>${t}</b> (${lastPid} has ${prev.remainingTime} left).` });
           }
         }
-        ganttStart = t;
+        // Open a new gantt block for the incoming process
+        result.ganttBlocks.push(new GanttBlock(proc.pid, t, t + 1, false, proc.pid));
         lastPid = proc.pid;
+      } else {
+        // Same process continues — just extend the current block
+        result.ganttBlocks[result.ganttBlocks.length - 1].end = t + 1;
       }
 
       proc.remainingTime--;
@@ -232,24 +238,25 @@ class SRTF extends SchedulingAlgorithm {
       if (proc.remainingTime === 0) {
         proc.completionTime = t;
         proc.computeMetrics();
-        result.ganttBlocks.push(new GanttBlock(proc.pid, ganttStart, t, false, proc.pid));
         result.steps.push({ n: sn++, type: 'execute',
           html: `<em>${proc.pid}</em> completes at t=<b>${t}</b>
                  &nbsp;|&nbsp; TAT <span class="chip blue">${proc.turnaroundTime}</span>
                  WT <span class="chip green">${proc.waitingTime}</span>
                  RT <span class="chip purple">${proc.responseTime}</span>` });
-        ganttStart = t; lastPid = null;
+        lastPid = null; // block is closed; next process will open a new one
         completed++;
       }
     }
 
-    // Merge consecutive same-pid Gantt blocks for cleaner display
+    // Merge consecutive same-pid blocks for cleaner display
     const merged = [];
     result.ganttBlocks.forEach(b => {
       const last = merged[merged.length - 1];
       if (last && last.pid === b.pid && last.end === b.start && !b.isIdle) {
         last.end = b.end;
-      } else { merged.push({ ...b }); }
+      } else {
+        merged.push({ ...b });
+      }
     });
     result.ganttBlocks = merged;
 
